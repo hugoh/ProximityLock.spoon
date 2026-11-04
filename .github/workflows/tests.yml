@@ -1,0 +1,25 @@
+name: Tests
+
+permissions:
+  contents: read
+
+on: # yamllint disable-line rule:truthy
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: hugoh/gh-workflows/setup@bbbf25812da61dd48510494ce8d6c55e6f919aa6 # v1.40.13
+      - run: mise run test

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>net.larve.ProximityLockScanner</string>
+<key>CFBundleExecutable</key><string>ProximityLockScanner</string>
+<key>CFBundleName</key><string>ProximityLockScanner</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>LSUIElement</key><true/>
+<key>NSBluetoothAlwaysUsageDescription</key><string>ProximityLock scans for your phone to lock the Mac when you walk away.</string>
+</dict></plist>

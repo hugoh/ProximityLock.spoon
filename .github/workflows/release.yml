@@ -1,0 +1,42 @@
+name: Release
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-caller-${{ github.ref }}
+  cancel-in-progress: false
+
+on: # yamllint disable-line rule:truthy
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to release (used to backfill a missed release; leave empty for normal use)
+        required: false
+        type: string
+      bump:
+        description: Force the bump level (auto = derive from commits)
+        required: false
+        type: choice
+        default: auto
+        options: [auto, patch, minor, major]
+      docs_only:
+        description: Regenerate and redeploy the Pages docs only (no bump, no release)
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  release:
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    uses: hugoh/spoon-tools/.github/workflows/spoon-release.yml@5a90ddb4a9b945685ad9d8ff3d87bdcde15d6dc6 # v2.0.6
+    with:
+      spoon_name: ProximityLock
+      tag: ${{ inputs.tag }}
+      bump: ${{ inputs.bump }}
+      docs_only: ${{ inputs.docs_only == true }}

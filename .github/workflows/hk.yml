@@ -1,0 +1,21 @@
+name: hk
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-caller-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+on: # yamllint disable-line rule:truthy
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  check:
+    uses: hugoh/gh-workflows/.github/workflows/hk.yml@bbbf25812da61dd48510494ce8d6c55e6f919aa6 # v1.40.13
+    permissions:
+      contents: read
+      packages: read
+      statuses: write

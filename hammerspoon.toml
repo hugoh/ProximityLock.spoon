@@ -1,0 +1,27 @@
+# selene standard library for Hammerspoon Spoons. `lua51` base: selene's
+# prebuilt binaries dropped lua52+ support (regression since 0.28), and
+# Hammerspoon Spoons are 5.1-compatible in practice.
+[selene]
+base = "lua51"
+
+[hs]
+any = true
+
+# busted test globals
+[describe]
+any = true
+
+[it]
+any = true
+
+[pending]
+any = true
+
+[before_each]
+any = true
+
+[after_each]
+any = true
+
+[assert]
+any = true
