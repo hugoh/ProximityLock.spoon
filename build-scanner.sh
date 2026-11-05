@@ -19,5 +19,5 @@ mv "$staging" "$final"
 
 # Apps built from older sources are no longer needed.
 for old in "$cache"/*; do
-    [ "$old" = "$final" ] || rm -rf "$old"
+	[ "$old" = "$final" ] || rm -rf "$old"
 done
