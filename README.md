@@ -1,7 +1,7 @@
 # ProximityLock Spoon
 
 [![MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Hammerspoon Spoon](https://img.shields.io/badge/Hammerspoon-Spoon-FFA500.svg)](https://www.hammerspoon.org/docs/index.html)
+[![Hammerspoon Spoon](https://img.shields.io/badge/Hammerspoon-Spoon-FFA500.svg)](https://proximitylock-spoon.larve.net/)
 
 A Hammerspoon Spoon that locks your Mac when your Bluetooth LE devices (phone, watch) go out of range. It never unlocks.
 
@@ -91,3 +91,7 @@ macWatcher:onWifiChange(function(ssid) proximity:setRunning(ssid ~= "HomeSSID") 
 ## Tests
 
 `mise run test` runs the busted specs in `spec/`. `scanner.lua` and `warning.lua` are tested against a stubbed `hs`. `init.lua`, `picker.lua` and `menubar.lua` have no specs; the logic they depend on lives in `presence.lua`, which does.
+
+## API documentation
+
+Full [API reference](https://proximitylock-spoon.larve.net/) is generated from the docstrings in `init.lua` (`mise run docs`).
