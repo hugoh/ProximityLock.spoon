@@ -148,7 +148,6 @@ return function(obj, presence)
 				return true
 			end, { fifo })
 			self._scanner:start()
-			self._engine:resetSilence(hs.timer.secondsSinceEpoch())
 			self.log.i("Scanner started")
 
 			-- -n: without it, an instance that is still dying would be reused and ignore the arguments.
@@ -160,6 +159,8 @@ return function(obj, presence)
 		end)
 	end
 
+	-- Restarts keep the silence clock running: a scanner that keeps stalling must still reach the
+	-- silence limit. Only a deliberate pause (listing) or a wake discards the silence.
 	-- Stops the streaming scanner without the usual exit-triggered restart.
 	function obj:_pauseScanner()
 		if self._restart then self._restart:stop() end
@@ -234,7 +235,10 @@ return function(obj, presence)
 				-- exit before it has delivered the last of the output, so parse after a short wait.
 				self:_later(0.5, function()
 					self._listing = nil
-					if self._engine then self:_startScanner() end
+					if self._engine then
+						self._engine:resetSilence(hs.timer.secondsSinceEpoch())
+						self:_startScanner()
+					end
 					callback(presence.parseDeviceList(text))
 				end)
 			end, function(_, out)
