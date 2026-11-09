@@ -338,6 +338,34 @@ describe("_onScannerOutput", function()
 	end)
 end)
 
+describe("silence across a scanner restart", function()
+	before_each(function()
+		setup()
+		startEngine()
+		h.appExists = true
+	end)
+
+	it("keeps counting when the scanner restarts, so repeated stalls still reach the silence limit", function()
+		obj._engine:resetSilence(50)
+		h.now = 70
+
+		obj:_restartScanner()
+
+		assert.are.equal(50, obj._engine:lastSeen())
+	end)
+
+	it("starts the silence clock over after a nearby-devices listing", function()
+		obj._engine:resetSilence(50)
+		h.now = 70
+
+		obj:_scanNearby(5, function() end)
+		tasksRunning("/bin/cat")[1].callback(0)
+		h.timers[#h.timers].fn()
+
+		assert.are.equal(70, obj._engine:lastSeen())
+	end)
+end)
+
 describe("_restartStalledScanner", function()
 	local restarts
 
