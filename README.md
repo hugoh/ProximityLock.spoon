@@ -37,7 +37,7 @@ hs.loadSpoon("ProximityLock")
     devices = { "Alex’s iPhone" },  -- optional starting list; see "Choosing devices"
     lockThreshold = -75,            -- dBm, the default
     lockDelay = 10,                 -- seconds, the default
-    missTimeout = 30,               -- seconds, the default
+    missTimeout = 60,               -- seconds, the default
     lockWhen = "any",               -- "any" (default) or "all"; see "How it decides"
     lockWarning = 3,                -- seconds of warning before locking, the default; 0 = none
   })

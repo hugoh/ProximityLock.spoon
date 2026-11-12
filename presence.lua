@@ -18,7 +18,7 @@ M.defaults = {
 	returnHysteresis = 8,
 	lockDelay = 10,
 	returnDelay = 3,
-	missTimeout = 30,
+	missTimeout = 60,
 	lockWhen = "any",
 }
 

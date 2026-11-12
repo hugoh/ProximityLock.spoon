@@ -43,8 +43,8 @@ obj.lockDelay = 10
 
 --- ProximityLock.missTimeout
 --- Variable
---- Seconds without any advertisement from a device before it counts as away (default: 30).
-obj.missTimeout = 30
+--- Seconds without any advertisement from a device before it counts as away (default: 60).
+obj.missTimeout = 60
 
 --- ProximityLock.lockWhen
 --- Variable
