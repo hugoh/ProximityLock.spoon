@@ -123,7 +123,11 @@ return function(obj, presence)
 		for _, line in ipairs(lines) do
 			local id, rssi, name = presence.parseReading(line)
 			if id then
-				local _, first = self._engine:feedReading(now, id, name, rssi)
+				local matched, first = self._engine:feedReading(now, id, name, rssi)
+				if matched and self._restartedAt then
+					self.log.f("Readings resumed %.0fs after restart", now - self._restartedAt)
+					self._restartedAt = nil
+				end
 				if first then self.log.f("Device found: %s (%d dBm)", name ~= "" and name or id, rssi) end
 			end
 		end
@@ -148,6 +152,7 @@ return function(obj, presence)
 				return true
 			end, { fifo })
 			self._scanner:start()
+			self._startedAt = hs.timer.secondsSinceEpoch()
 			self.log.i("Scanner started")
 
 			-- -n: without it, an instance that is still dying would be reused and ignore the arguments.
@@ -175,6 +180,7 @@ return function(obj, presence)
 	function obj:_restartScanner()
 		self:_pauseScanner()
 		self._stallRestarted = false
+		self._restartedAt = hs.timer.secondsSinceEpoch()
 		self:_startScanner()
 	end
 
@@ -209,7 +215,11 @@ return function(obj, presence)
 		if silent < STALL_SECONDS then
 			self._stallRestarted = false
 		elseif not self._stallRestarted then
-			self.log.wf("No readings for %.0fs; restarting scanner", silent)
+			self.log.wf(
+				"No readings for %.0fs (scanner up %.0fs); restarting scanner",
+				silent,
+				now - (self._startedAt or now)
+			)
 			self:_restartScanner()
 			self._stallRestarted = true
 		end

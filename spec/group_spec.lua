@@ -210,7 +210,7 @@ describe("describe", function()
 		assert.are.equal("Phone: ≈-60 dBm, seen 5s ago", lines[1])
 		assert.are.equal("Watch: searching", lines[2])
 		assert.are.equal("Locks only when every device is away", lines[3])
-		assert.are.equal("Locks under -75 dBm for 10s, or after 30s of silence", lines[4])
+		assert.are.equal("Locks under -75 dBm for 10s, or after 60s of silence", lines[4])
 		assert.are.equal("Back over -67 dBm for 3s", lines[5])
 	end)
 
@@ -220,7 +220,7 @@ describe("describe", function()
 		local lines = group:describe(1)
 
 		assert.are.equal("Phone: searching", lines[1])
-		assert.are.equal("Locks under -75 dBm for 10s, or after 30s of silence", lines[2])
+		assert.are.equal("Locks under -75 dBm for 10s, or after 60s of silence", lines[2])
 	end)
 
 	it("prefixes a device's debug log lines with its label", function()

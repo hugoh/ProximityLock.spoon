@@ -307,6 +307,16 @@ describe("_onScannerOutput", function()
 		startEngine()
 	end)
 
+	it("logs how long readings took to resume after a restart", function()
+		h.now = 114
+		obj._restartedAt = 100
+		obj:_onScannerOutput("ID-1\t-60\tPhone\n")
+		obj:_onScannerOutput("ID-1\t-61\tPhone\n")
+
+		assert.is_true(logged("Readings resumed 14s after restart"))
+		assert.is_nil(obj._restartedAt)
+	end)
+
 	it("keeps an unfinished line until the rest arrives", function()
 		obj:_onScannerOutput("ID-1\t-60\tPhone\nID-1\t-6")
 
@@ -387,6 +397,13 @@ describe("_restartStalledScanner", function()
 		obj:_restartStalledScanner(26)
 
 		assert.are.equal(1, restarts)
+	end)
+
+	it("logs how long the scanner had been up when it stalled", function()
+		obj._startedAt = 5
+		obj:_restartStalledScanner(25)
+
+		assert.is_true(logged("No readings for 25s (scanner up 20s)"))
 	end)
 
 	it("restarts again after a stall that recovered", function()
