@@ -46,6 +46,12 @@ obj.lockDelay = 10
 --- Seconds without any advertisement from a device before it counts as away (default: 60).
 obj.missTimeout = 60
 
+--- ProximityLock.strongMissTimeout
+--- Variable
+--- Like missTimeout, but for a device whose last smoothed signal was at or above lockThreshold: it
+--- may just have stopped advertising while still close, so it gets longer (default: 180).
+obj.strongMissTimeout = 180
+
 --- ProximityLock.lockWhen
 --- Variable
 --- With several devices: "any" (default) locks as soon as one of them is away, so leaving a phone
@@ -93,6 +99,7 @@ local CONFIG_KEYS = {
 	"lockThreshold",
 	"lockDelay",
 	"missTimeout",
+	"strongMissTimeout",
 	"lockWhen",
 	"lockWarning",
 	"onAway",
@@ -139,6 +146,7 @@ function obj:start()
 		lockThreshold = self.lockThreshold,
 		lockDelay = self.lockDelay,
 		missTimeout = self.missTimeout,
+		strongMissTimeout = self.strongMissTimeout,
 		lockWhen = self.lockWhen,
 		log = function(message) self.log.d(message) end,
 		onAway = function(reason)

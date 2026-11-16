@@ -19,6 +19,7 @@ M.defaults = {
 	lockDelay = 10,
 	returnDelay = 3,
 	missTimeout = 60,
+	strongMissTimeout = 180,
 	lockWhen = "any",
 }
 
@@ -115,16 +116,23 @@ function Engine:_transition(state, callback, reason)
 	if callback then callback(reason) end
 end
 
+-- A device last heard strong may just have stopped advertising while still close, so it gets longer
+-- than one that was fading out (or never heard).
+function Engine:_silenceLimit()
+	if self.estimate and self.estimate >= self.lockThreshold then return self.strongMissTimeout end
+	return self.missTimeout
+end
+
 function Engine:_logSilence(now)
 	local bucket = math.floor((now - self.lastSeen) / 5)
 	if bucket > 0 and bucket ~= self.silenceBucket then
-		self:_log("no sample for %ds (locks at %gs)", bucket * 5, self.missTimeout)
+		self:_log("no sample for %ds (locks at %gs)", bucket * 5, self:_silenceLimit())
 	end
 	self.silenceBucket = bucket
 end
 
 function Engine:tick(now)
-	local fresh = now - self.lastSeen < self.missTimeout
+	local fresh = now - self.lastSeen < self:_silenceLimit()
 	if self.state == "present" then
 		self:_logSilence(now)
 		local weak = self.estimate ~= nil and self.estimate < self.lockThreshold
@@ -396,10 +404,11 @@ function Group:describe(now)
 	end
 	table.insert(
 		lines,
-		("Locks under %g dBm for %gs, or after %gs of silence"):format(
+		("Locks under %g dBm for %gs, or after %gs of silence (%gs if last heard strong)"):format(
 			settings.lockThreshold,
 			settings.lockDelay,
-			settings.missTimeout
+			settings.missTimeout,
+			settings.strongMissTimeout or M.defaults.strongMissTimeout
 		)
 	)
 	table.insert(
