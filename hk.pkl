@@ -8,6 +8,9 @@ local linters = new Mapping<String, Step> {
     ...Base.base
     ...Base.lua
     ...Base.shell
+    ["swiftlint"] = (Builtins.swiftlint) {
+        condition = "exec_ok('command -v swiftlint')"
+    }
 }
 
 steps = linters
