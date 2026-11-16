@@ -159,18 +159,32 @@ function Engine:tick(now)
 	end
 end
 
--- The pipe protocol with the scanner app: one "<identifier>\t<rssi>\t<name>" line per
--- advertisement. Returns the identifier, RSSI (a number from -127 to 0) and name ("" if unnamed), or
--- nil for anything that is not a reading. Extra tabs stay in the name rather than shifting fields.
+-- The pipe protocol with the scanner app. Every line starts with its type, and anything that does not
+-- fit one of these is dropped, so what a device calls itself cannot pass for another kind of line:
+--   "R\t<identifier>\t<rssi>\t<name>"   one advertisement from a matching device
+--   "H\t<ads>\t<state>"                 every 10 s: advertisements heard from any device, Bluetooth state
+local MAX_ID, MAX_NAME = 64, 128
+
+-- Parses a reading. Returns the identifier, RSSI (a number from -127 to 0) and name ("" if unnamed,
+-- cut to MAX_NAME bytes), or nil for anything that is not a reading. Extra tabs stay in the name rather
+-- than shifting fields.
 function M.parseReading(line)
-	local id, rssi, name = line:match("^([^\t]+)\t(-?%d+)\t(.*)$")
+	local id, rssi, name = line:match("^R\t([^\t]+)\t(-?%d+)\t(.*)$")
 	if not id then
-		id, rssi = line:match("^([^\t]+)\t(-?%d+)$")
+		id, rssi = line:match("^R\t([^\t]+)\t(-?%d+)$")
 		name = ""
 	end
 	rssi = tonumber(rssi)
-	if not id or rssi < -127 or rssi > 0 then return nil end
-	return id, rssi, name
+	if not id or #id > MAX_ID or rssi < -127 or rssi > 0 then return nil end
+	return id, rssi, name:sub(1, MAX_NAME)
+end
+
+-- Parses a heartbeat: how many advertisements from any device the scanner heard since the last one,
+-- and CoreBluetooth's manager state. Returns both, or nil for anything else.
+function M.parseHeartbeat(line)
+	local ads, state = line:match("^H\t(%d+)\t(%d+)$")
+	if not ads then return nil end
+	return tonumber(ads), tonumber(state)
 end
 
 -- Splits streamed output into complete lines and the unfinished tail to prepend to the next chunk.

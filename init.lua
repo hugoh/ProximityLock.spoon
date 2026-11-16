@@ -86,6 +86,21 @@ obj.showMenubar = true
 --- smoothed value, the filter gain, and the weak/strong/silence timers.
 obj.logLevel = "info"
 
+--- ProximityLock.scannerLog
+--- Variable
+--- When true, the scanner app also appends timestamped heartbeats, readings and Bluetooth state
+--- changes to ~/Library/Caches/ProximityLock/scanner.log (default: false). It is written by the
+--- scanner itself, so it shows what was sent even when the pipe to Hammerspoon stalls. Takes effect
+--- the next time the scanner starts.
+obj.scannerLog = false
+
+--- ProximityLock.scannerRescan
+--- Variable
+--- When true, the scanner app restarts its Bluetooth scan by itself when a matched device has been
+--- quiet for over 10 seconds while others are still heard (default: false; experimental, it may
+--- upset the Bluetooth daemon). Takes effect the next time the scanner starts.
+obj.scannerRescan = false
+
 obj.log = hs.logger.new("ProximityLock", "info")
 
 local presence = dofile(hs.spoons.resourcePath("presence.lua"))
@@ -105,6 +120,8 @@ local CONFIG_KEYS = {
 	"onAway",
 	"showMenubar",
 	"logLevel",
+	"scannerLog",
+	"scannerRescan",
 }
 
 --- ProximityLock:configure(opts)
@@ -141,7 +158,7 @@ function obj:start()
 	end
 
 	self:stop()
-	self._buffer, self._lastTick = "", nil
+	self._buffer, self._lastTick, self._sourceHash = "", nil, nil
 	self._engine = presence.newGroup({
 		lockThreshold = self.lockThreshold,
 		lockDelay = self.lockDelay,
@@ -198,12 +215,12 @@ function obj:stop()
 	if self._engine then self.log.f("Stopped %s v%s", self.name, self.version) end
 	if self._ticker then self._ticker:stop() end
 	if self._wakeWatcher then self._wakeWatcher:stop() end
-	if self._restart then self._restart:stop() end
+	if self._restart then self:_cancelLater(self._restart) end
 	if self._scanner then
 		self._scanner:setCallback(nil)
 		self._scanner:terminate()
 	end
-	self:_killScanner()
+	self:_stopScanner(function() end)
 	self._ticker, self._wakeWatcher, self._restart, self._scanner, self._engine = nil, nil, nil, nil, nil
 	if self._menubar then self:_refreshMenubar() end
 	return self

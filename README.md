@@ -45,7 +45,7 @@ hs.loadSpoon("ProximityLock")
   :start()
 ```
 
-All settings are optional. With no `devices` and none chosen yet, `start()` opens the device picker. Three more can be set the same way: `showMenubar` (default `true`), `logLevel` (`"info"` by default; `"debug"` also logs every sample) and `onAway`, the function that locks (by default `hs.caffeinate.lockScreen()`).
+All settings are optional. With no `devices` and none chosen yet, `start()` opens the device picker. Five more can be set the same way: `scannerRescan` (default `false`; the scanner app restarts its own Bluetooth scan when a matched device goes quiet, experimental), `scannerLog` (default `false`; the scanner app appends timestamped heartbeats, readings and Bluetooth state changes to `~/Library/Caches/ProximityLock/scanner.log`, to tell a stalled pipe from a deaf scanner), `showMenubar` (default `true`), `logLevel` (`"info"` by default; `"debug"` also logs every sample) and `onAway`, the function that locks (by default `hs.caffeinate.lockScreen()`).
 
 If a device is never heard, it counts as away `missTimeout` seconds after `start()`. With `lockWhen = "any"` that locks the Mac, so don't track a device that is switched off.
 
