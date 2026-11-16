@@ -126,7 +126,9 @@ final class Scanner: NSObject, CBCentralManagerDelegate {
         guard rescanEnabled, !listing, central.state == .poweredOn, now.timeIntervalSince(lastRescanAt) > quietLimit,
             lastHeard.values.contains(where: { now.timeIntervalSince($0) > quietLimit })
         else { return }
-        record("rescan: a matched device was quiet for over \(Int(quietLimit)) s; ads since last heartbeat=\(advertisementsSinceHeartbeat)")
+        record(
+            "rescan: a matched device was quiet for over \(Int(quietLimit)) s; "
+                + "ads since last heartbeat=\(advertisementsSinceHeartbeat)")
         central.stopScan()
         startScan()
         lastRescanAt = now
