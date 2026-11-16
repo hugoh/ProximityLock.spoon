@@ -9,7 +9,7 @@ A Hammerspoon Spoon that locks your Mac when your Bluetooth LE devices (phone, w
 
 1. A small scanner app (`ProximityLockScanner.app`, built from `scan.swift`) streams the tracked devices' advertisements with their RSSI back through a named pipe. It runs as its own app because macOS blames Hammerspoon for a child's Bluetooth access, and Hammerspoon has no Bluetooth usage description, so it would kill the scanner.
 2. A Kalman filter smooths each device's RSSI. Between samples its uncertainty grows, so a reading after a gap is trusted more, and a single spike barely moves the estimate. The two noise numbers at the top of `presence.lua` set how much it smooths; see the comment there to tune them.
-3. A device counts as **away** when its smoothed RSSI stays under `lockThreshold` for `lockDelay` seconds, or when no advertisement arrives for `missTimeout` seconds. A dip that recovers in time resets the timer. After the Mac sleeps, the scanner restarts and the assessment starts over, so the silence during sleep doesn't count against a device.
+3. A device counts as **away** when its smoothed RSSI stays under `lockThreshold` for `lockDelay` seconds, or when no advertisement arrives for `missTimeout` seconds. If its last smoothed signal was at or above `lockThreshold` (it may just have stopped advertising while close), the silence limit is `strongMissTimeout` instead. A dip that recovers in time resets the timer. After the Mac sleeps, the scanner restarts and the assessment starts over, so the silence during sleep doesn't count against a device.
 4. With several devices, `lockWhen` decides when the Mac locks. `"any"` (the default) locks as soon as one device is away, so a phone left on the desk doesn't keep the Mac open after you walk off with your watch. `"all"` locks only when every device is away, so a phone left in another room doesn't lock you out while your watch is with you; the catch is that a device left near the Mac keeps it unlocked. A device counts as back once its signal is well above the threshold again (8 dB over, for 3 s), and with `"any"` the lock re-arms only once every device is back.
 
 ## Requirements
@@ -38,13 +38,14 @@ hs.loadSpoon("ProximityLock")
     lockThreshold = -75,            -- dBm, the default
     lockDelay = 10,                 -- seconds, the default
     missTimeout = 60,               -- seconds, the default
+    strongMissTimeout = 180,        -- seconds, the default; for a device last heard at or above lockThreshold
     lockWhen = "any",               -- "any" (default) or "all"; see "How it decides"
     lockWarning = 3,                -- seconds of warning before locking, the default; 0 = none
   })
   :start()
 ```
 
-All settings are optional. With no `devices` and none chosen yet, `start()` opens the device picker. Three more can be set the same way: `showMenubar` (default `true`), `logLevel` (`"info"` by default; `"debug"` also logs every sample) and `onAway`, the function that locks (by default `hs.caffeinate.lockScreen()`).
+All settings are optional. With no `devices` and none chosen yet, `start()` opens the device picker. Five more can be set the same way: `scannerRescan` (default `false`; the scanner app restarts its own Bluetooth scan when a matched device goes quiet, experimental), `scannerLog` (default `false`; the scanner app appends timestamped heartbeats, readings and Bluetooth state changes to `~/Library/Caches/ProximityLock/scanner.log`, to tell a stalled pipe from a deaf scanner), `showMenubar` (default `true`), `logLevel` (`"info"` by default; `"debug"` also logs every sample) and `onAway`, the function that locks (by default `hs.caffeinate.lockScreen()`).
 
 If a device is never heard, it counts as away `missTimeout` seconds after `start()`. With `lockWhen = "any"` that locks the Mac, so don't track a device that is switched off.
 

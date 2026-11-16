@@ -19,6 +19,7 @@ M.defaults = {
 	lockDelay = 10,
 	returnDelay = 3,
 	missTimeout = 60,
+	strongMissTimeout = 180,
 	lockWhen = "any",
 }
 
@@ -115,16 +116,23 @@ function Engine:_transition(state, callback, reason)
 	if callback then callback(reason) end
 end
 
+-- A device last heard strong may just have stopped advertising while still close, so it gets longer
+-- than one that was fading out (or never heard).
+function Engine:_silenceLimit()
+	if self.estimate and self.estimate >= self.lockThreshold then return self.strongMissTimeout end
+	return self.missTimeout
+end
+
 function Engine:_logSilence(now)
 	local bucket = math.floor((now - self.lastSeen) / 5)
 	if bucket > 0 and bucket ~= self.silenceBucket then
-		self:_log("no sample for %ds (locks at %gs)", bucket * 5, self.missTimeout)
+		self:_log("no sample for %ds (locks at %gs)", bucket * 5, self:_silenceLimit())
 	end
 	self.silenceBucket = bucket
 end
 
 function Engine:tick(now)
-	local fresh = now - self.lastSeen < self.missTimeout
+	local fresh = now - self.lastSeen < self:_silenceLimit()
 	if self.state == "present" then
 		self:_logSilence(now)
 		local weak = self.estimate ~= nil and self.estimate < self.lockThreshold
@@ -151,18 +159,32 @@ function Engine:tick(now)
 	end
 end
 
--- The pipe protocol with the scanner app: one "<identifier>\t<rssi>\t<name>" line per
--- advertisement. Returns the identifier, RSSI (a number from -127 to 0) and name ("" if unnamed), or
--- nil for anything that is not a reading. Extra tabs stay in the name rather than shifting fields.
+-- The pipe protocol with the scanner app. Every line starts with its type, and anything that does not
+-- fit one of these is dropped, so what a device calls itself cannot pass for another kind of line:
+--   "R\t<identifier>\t<rssi>\t<name>"   one advertisement from a matching device
+--   "H\t<ads>\t<state>"                 every 10 s: advertisements heard from any device, Bluetooth state
+local MAX_ID, MAX_NAME = 64, 128
+
+-- Parses a reading. Returns the identifier, RSSI (a number from -127 to 0) and name ("" if unnamed,
+-- cut to MAX_NAME bytes), or nil for anything that is not a reading. Extra tabs stay in the name rather
+-- than shifting fields.
 function M.parseReading(line)
-	local id, rssi, name = line:match("^([^\t]+)\t(-?%d+)\t(.*)$")
+	local id, rssi, name = line:match("^R\t([^\t]+)\t(-?%d+)\t(.*)$")
 	if not id then
-		id, rssi = line:match("^([^\t]+)\t(-?%d+)$")
+		id, rssi = line:match("^R\t([^\t]+)\t(-?%d+)$")
 		name = ""
 	end
 	rssi = tonumber(rssi)
-	if not id or rssi < -127 or rssi > 0 then return nil end
-	return id, rssi, name
+	if not id or #id > MAX_ID or rssi < -127 or rssi > 0 then return nil end
+	return id, rssi, name:sub(1, MAX_NAME)
+end
+
+-- Parses a heartbeat: how many advertisements from any device the scanner heard since the last one,
+-- and CoreBluetooth's manager state. Returns both, or nil for anything else.
+function M.parseHeartbeat(line)
+	local ads, state = line:match("^H\t(%d+)\t(%d+)$")
+	if not ads then return nil end
+	return tonumber(ads), tonumber(state)
 end
 
 -- Splits streamed output into complete lines and the unfinished tail to prepend to the next chunk.
@@ -396,10 +418,11 @@ function Group:describe(now)
 	end
 	table.insert(
 		lines,
-		("Locks under %g dBm for %gs, or after %gs of silence"):format(
+		("Locks under %g dBm for %gs, or after %gs of silence (%gs if last heard strong)"):format(
 			settings.lockThreshold,
 			settings.lockDelay,
-			settings.missTimeout
+			settings.missTimeout,
+			settings.strongMissTimeout or M.defaults.strongMissTimeout
 		)
 	)
 	table.insert(

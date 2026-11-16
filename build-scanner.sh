@@ -17,7 +17,9 @@ cp "$source_dir/Info.plist" "$app/Contents/Info.plist"
 /usr/bin/codesign --force --sign - "$app"
 mv "$staging" "$final"
 
-# Apps built from older sources are no longer needed.
-for old in "$cache"/*; do
+# Apps built from older sources are no longer needed. Only directories are removed: the cache also
+# holds scanner.log, which must survive a rebuild.
+for old in "$cache"/*/; do
+	old=${old%/}
 	[ "$old" = "$final" ] || rm -rf "$old"
 done

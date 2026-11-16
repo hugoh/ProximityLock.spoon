@@ -89,6 +89,7 @@ local function setup()
 	obj = {
 		log = {
 			i = function(message) table.insert(h.logs, message) end,
+			df = formatted(h.logs),
 			f = formatted(h.logs),
 			wf = formatted(h.logs),
 			ef = formatted(h.logs),
@@ -109,6 +110,30 @@ local function tasksRunning(path)
 		if task.path == path then table.insert(found, task) end
 	end
 	return found
+end
+
+local function readFile(path)
+	local handle = assert(io.open(path, "rb"))
+	local text = handle:read("a")
+	handle:close()
+	return text
+end
+
+-- A running scanner app: SIGKILL (kill9) removes it, unless `stubborn` and it also ignores that.
+local function newApp(pid, stubborn)
+	local app = { pid = function() return pid end }
+	function app.kill9()
+		h.killed = h.killed + 1
+		if not stubborn then h.apps = {} end
+	end
+	return app
+end
+
+local function executed(command)
+	for _, line in ipairs(h.executed) do
+		if line == command then return true end
+	end
+	return false
 end
 
 local function appPath()
@@ -200,17 +225,35 @@ describe("_ensureScannerApp", function()
 	it("names the app after the sources and the build script", function()
 		local original = appPath()
 
+		obj._sourceHash = nil
 		writeFile("scan.swift", "// changed\n")
 		local afterSource = appPath()
+		obj._sourceHash = nil
 		writeFile("scan.swift", SOURCES["scan.swift"])
 		writeFile("build-scanner.sh", "#!/bin/sh\necho changed\n")
 		local afterScript = appPath()
+		obj._sourceHash = nil
 		writeFile("build-scanner.sh", SOURCES["build-scanner.sh"])
 
 		assert.are_not.equal(original, afterSource)
 		assert.are_not.equal(original, afterScript)
 		assert.are_not.equal(afterSource, afterScript)
 		assert.are.equal(original, appPath())
+	end)
+
+	it("hashes the sources once, not on every start", function()
+		local hashes = 0
+		local sha = _G.hs.hash.SHA256
+		_G.hs.hash.SHA256 = function(text)
+			hashes = hashes + 1
+			return sha(text)
+		end
+
+		appPath()
+		appPath()
+		appPath()
+
+		assert.are.equal(1, hashes)
 	end)
 end)
 
@@ -244,6 +287,116 @@ describe("_startScanner", function()
 		assert.are.equal("/tmp/t/proximitylock.fifo", launch.args[4])
 		assert.are.equal("phone", launch.args[5])
 		assert.are.equal(reader, obj._scanner)
+	end)
+
+	it("leaves the scanner's own log off by default", function()
+		startEngine()
+		h.appExists = true
+
+		obj:_startScanner()
+
+		assert.are.same(
+			{ "-n", "--args" },
+			{ tasksRunning("/usr/bin/open")[1].args[1], tasksRunning("/usr/bin/open")[1].args[3] }
+		)
+		assert.are_not.equal("--log", tasksRunning("/usr/bin/open")[1].args[4])
+	end)
+
+	it("leaves the scanner's re-scan off by default", function()
+		startEngine()
+		h.appExists = true
+
+		obj:_startScanner()
+
+		for _, arg in ipairs(tasksRunning("/usr/bin/open")[1].args) do
+			assert.are_not.equal("--rescan", arg)
+		end
+	end)
+
+	it("passes --rescan before the pipe when scannerRescan is on", function()
+		startEngine()
+		h.appExists = true
+		obj.scannerRescan = true
+
+		obj:_startScanner()
+
+		local args = tasksRunning("/usr/bin/open")[1].args
+		assert.are.equal("--rescan", args[4])
+		assert.are.equal("/tmp/t/proximitylock.fifo", args[5])
+	end)
+
+	it("makes the scanner log private before the scanner writes to it", function()
+		startEngine()
+		h.appExists = true
+		obj.scannerLog = true
+
+		obj:_startScanner()
+
+		local path = os.getenv("HOME") .. "/Library/Caches/ProximityLock/scanner.log"
+		assert.is_true(executed(('/usr/bin/touch "%s" && /bin/chmod 600 "%s"'):format(path, path)))
+	end)
+
+	it("does not touch the scanner log when scannerLog is off", function()
+		startEngine()
+		h.appExists = true
+
+		obj:_startScanner()
+
+		for _, command in ipairs(h.executed) do
+			assert.is_nil(command:find("chmod", 1, true))
+		end
+	end)
+
+	it("passes the scanner a log file before the pipe when scannerLog is on", function()
+		startEngine()
+		h.appExists = true
+		obj.scannerLog = true
+
+		obj:_startScanner()
+
+		local args = tasksRunning("/usr/bin/open")[1].args
+		assert.are.equal("--log", args[4])
+		assert.are.equal(os.getenv("HOME") .. "/Library/Caches/ProximityLock/scanner.log", args[5])
+		assert.are.equal("/tmp/t/proximitylock.fifo", args[6])
+		assert.are.equal("phone", args[7])
+	end)
+
+	it("notes in the scanner log that it is starting, when scannerLog is on", function()
+		startEngine()
+		h.appExists = true
+		obj.scannerLog, obj._scannerLogPath = true, os.tmpname()
+
+		obj:_startScanner()
+
+		assert.is_truthy(readFile(obj._scannerLogPath):match("Z spoon: starting scanner\n$"))
+	end)
+
+	it("notes in the scanner log that it is killing a scanner that ignores SIGTERM", function()
+		startEngine()
+		obj.scannerLog, obj._scannerLogPath = true, os.tmpname()
+		h.apps = { newApp(321, true) }
+
+		obj:_stopScanner(function() end)
+		for _ = 1, 8 do
+			h.timers[#h.timers].fn()
+		end
+
+		assert.is_truthy(readFile(obj._scannerLogPath):match("Z spoon: killing scanner\n$"))
+	end)
+
+	it("writes no scanner log notes when scannerLog is off", function()
+		startEngine()
+		h.appExists = true
+		obj._scannerLogPath = os.tmpname()
+
+		obj:_startScanner()
+		h.apps = { newApp(321, true) }
+		obj:_stopScanner(function() end)
+		for _ = 1, 8 do
+			h.timers[#h.timers].fn()
+		end
+
+		assert.are.equal("", readFile(obj._scannerLogPath))
 	end)
 
 	it("starts only one scanner when several starts were waiting for the same build", function()
@@ -285,19 +438,54 @@ describe("_startScanner", function()
 		assert.are.equal(0, #tasksRunning("/bin/cat"))
 	end)
 
-	it("restarts after the reader ends, once the app has been killed", function()
+	it("restarts after the reader ends, once the app has been asked to stop and has gone", function()
 		startEngine()
 		h.appExists = true
-		local app = { kill9 = function() h.killed = h.killed + 1 end }
-		h.apps = { app }
 		obj:_startScanner()
+		h.apps = { newApp(321) }
 
 		tasksRunning("/bin/cat")[1].callback(0)
 
-		assert.are.equal(1, h.killed)
+		assert.is_true(executed("/bin/kill -TERM 321"))
+		assert.are.equal(0, h.killed)
+		h.apps = {}
+		h.timers[#h.timers].fn()
 		assert.are.equal(5, h.timers[#h.timers].delay)
 		h.timers[#h.timers].fn()
 		assert.are.equal(2, #tasksRunning("/bin/cat"))
+	end)
+
+	it("ignores output that arrives after locking was turned off", function()
+		startEngine()
+		obj._engine = nil
+
+		assert.has_no.errors(function() obj:_onScannerOutput("R\tID-1\t-50\tPhone\n") end)
+	end)
+
+	it("drops a half-written line left over from the previous scanner when it starts", function()
+		startEngine()
+		h.appExists = true
+		obj:_onScannerOutput("R\tID-1\t-5")
+
+		obj:_startScanner()
+		obj:_onScannerOutput("0\tPhone\n")
+
+		assert.is_nil(obj._engine.devices[1].engine.estimate)
+	end)
+
+	it("forgets a pending restart without keeping its timer", function()
+		startEngine()
+		h.appExists = true
+		obj:_startScanner()
+		tasksRunning("/bin/cat")[1].callback(0)
+		h.timers[#h.timers].fn()
+		local restart = h.timers[#h.timers]
+		obj._restart = restart
+
+		obj:_pauseScanner()
+
+		assert.is_true(restart.stopped)
+		assert.is_nil(obj._pending[restart])
 	end)
 end)
 
@@ -310,17 +498,41 @@ describe("_onScannerOutput", function()
 	it("logs how long readings took to resume after a restart", function()
 		h.now = 114
 		obj._restartedAt = 100
-		obj:_onScannerOutput("ID-1\t-60\tPhone\n")
-		obj:_onScannerOutput("ID-1\t-61\tPhone\n")
+		obj:_onScannerOutput("R\tID-1\t-60\tPhone\n")
+		obj:_onScannerOutput("R\tID-1\t-61\tPhone\n")
 
 		assert.is_true(logged("Readings resumed 14s after restart"))
 		assert.is_nil(obj._restartedAt)
 	end)
 
-	it("keeps an unfinished line until the rest arrives", function()
-		obj:_onScannerOutput("ID-1\t-60\tPhone\nID-1\t-6")
+	it("logs how long the silence lasted when readings resume after a restart", function()
+		h.now = 114
+		obj._restartedAt = 100
+		obj:_onScannerOutput("R\tID-1\t-60\tPhone\n")
 
-		assert.are.equal("ID-1\t-6", obj._buffer)
+		assert.is_true(logged("Readings resumed 14s after restart (silent for 114s)"))
+	end)
+
+	it("logs a long silence that ended without a restart", function()
+		obj._engine.devices[1].engine.lastSeen = 100
+		h.now = 118
+		obj:_onScannerOutput("R\tID-1\t-60\tPhone\n")
+
+		assert.is_true(logged("Readings resumed on their own after 18s of silence"))
+	end)
+
+	it("stays quiet about an ordinary gap between readings", function()
+		obj._engine.devices[1].engine.lastSeen = 100
+		h.now = 105
+		obj:_onScannerOutput("R\tID-1\t-60\tPhone\n")
+
+		assert.is_false(logged("Readings resumed"))
+	end)
+
+	it("keeps an unfinished line until the rest arrives", function()
+		obj:_onScannerOutput("R\tID-1\t-60\tPhone\nR\tID-1\t-6")
+
+		assert.are.equal("R\tID-1\t-6", obj._buffer)
 
 		h.now = 105
 		obj:_onScannerOutput("2\tPhone\n")
@@ -330,9 +542,9 @@ describe("_onScannerOutput", function()
 	end)
 
 	it("announces a device once, on its first reading", function()
-		obj:_onScannerOutput("ID-1\t-60\tPhone\n")
+		obj:_onScannerOutput("R\tID-1\t-60\tPhone\n")
 		h.now = 105
-		obj:_onScannerOutput("ID-1\t-61\tPhone\n")
+		obj:_onScannerOutput("R\tID-1\t-61\tPhone\n")
 
 		local announcements = 0
 		for _, line in ipairs(h.logs) do
@@ -342,9 +554,55 @@ describe("_onScannerOutput", function()
 	end)
 
 	it("ignores readings of other devices and lines that are not readings", function()
-		obj:_onScannerOutput("ID-2\t-50\tWatch\ngarbage\nID-1\tloud\tPhone\n")
+		obj:_onScannerOutput("R\tID-2\t-50\tWatch\ngarbage\nR\tID-1\tloud\tPhone\nID-1\t-50\tPhone\n")
 
 		assert.is_nil(obj._engine.devices[1].engine.estimate)
+	end)
+end)
+
+describe("scanner heartbeats", function()
+	before_each(function()
+		setup()
+		startEngine()
+	end)
+
+	it("logs the advertisement count and Bluetooth state at debug level", function()
+		obj:_onScannerOutput("H\t12\t5\n")
+
+		assert.is_true(logged("Scanner heartbeat: 12 advertisements heard, Bluetooth state 5"))
+	end)
+
+	it("does not treat a heartbeat as a reading", function()
+		obj:_onScannerOutput("H\t0\t5\n")
+
+		assert.is_nil(obj._engine.devices[1].engine.estimate)
+	end)
+
+	it("says in the stall warning when the scanner was still sending heartbeats", function()
+		obj._restartScanner = function() end
+		h.now = 100
+		obj:_onScannerOutput("H\t0\t5\n")
+		obj:_restartStalledScanner(125)
+
+		assert.is_true(logged("last output 25s ago"))
+		assert.is_true(logged("last heartbeat 25s ago: 0 advertisements, Bluetooth state 5"))
+	end)
+
+	it("says in the stall warning when nothing at all arrived from the scanner", function()
+		obj._restartScanner = function() end
+		obj:_restartStalledScanner(35)
+
+		assert.is_true(logged("no output since the scanner started"))
+		assert.is_true(logged("no heartbeat yet"))
+	end)
+
+	it("counts any output, even a blank line, as the pipe being alive", function()
+		obj._restartScanner = function() end
+		h.now = 100
+		obj:_onScannerOutput("\n")
+		obj:_restartStalledScanner(125)
+
+		assert.is_true(logged("last output 25s ago"))
 	end)
 end)
 
@@ -386,33 +644,86 @@ describe("_restartStalledScanner", function()
 		obj._restartScanner = function() restarts = restarts + 1 end
 	end)
 
-	it("leaves a scanner that delivered recently alone", function()
-		obj:_restartStalledScanner(15)
+	it("leaves a scanner alone through the longest gap a quiet phone normally leaves", function()
+		obj:_restartStalledScanner(25)
 
 		assert.are.equal(0, restarts)
 	end)
 
 	it("restarts a silent scanner once per stall", function()
-		obj:_restartStalledScanner(25)
-		obj:_restartStalledScanner(26)
+		obj:_restartStalledScanner(35)
+		obj:_restartStalledScanner(36)
 
 		assert.are.equal(1, restarts)
 	end)
 
 	it("logs how long the scanner had been up when it stalled", function()
 		obj._startedAt = 5
-		obj:_restartStalledScanner(25)
+		obj:_restartStalledScanner(35)
 
-		assert.is_true(logged("No readings for 25s (scanner up 20s)"))
+		assert.is_true(logged("No readings for 35s (scanner up 30s)"))
 	end)
 
 	it("restarts again after a stall that recovered", function()
-		obj:_restartStalledScanner(25)
-		obj._engine.devices[1].engine.lastSeen = 30
-		obj:_restartStalledScanner(31)
-		obj:_restartStalledScanner(60)
+		obj:_restartStalledScanner(35)
+		obj._engine.devices[1].engine.lastSeen = 40
+		obj:_restartStalledScanner(41)
+		obj:_restartStalledScanner(80)
 
 		assert.are.equal(2, restarts)
+	end)
+
+	it("restarts again while the scanner hears nothing at all, once it has had time to settle", function()
+		obj._heartbeat = { at = 20, ads = 0, state = 5 }
+		obj:_restartStalledScanner(35)
+		obj._restartedAt = 35
+
+		obj:_restartStalledScanner(60)
+		assert.are.equal(1, restarts)
+
+		obj:_restartStalledScanner(65)
+		assert.are.equal(2, restarts)
+	end)
+
+	it("backs off while the scanner keeps hearing nothing", function()
+		obj._heartbeat = { at = 20, ads = 0, state = 5 }
+		obj:_restartStalledScanner(35)
+		obj._restartedAt = 35
+		obj:_restartStalledScanner(65)
+		obj._restartedAt = 65
+
+		obj:_restartStalledScanner(110)
+		assert.are.equal(2, restarts)
+
+		obj:_restartStalledScanner(125)
+		assert.are.equal(3, restarts)
+	end)
+
+	it("starts the backoff over once readings return", function()
+		obj._heartbeat = { at = 20, ads = 0, state = 5 }
+		obj:_restartStalledScanner(35)
+		obj._restartedAt = 35
+		obj:_restartStalledScanner(65)
+		obj._restartedAt = 65
+		obj._engine.devices[1].engine.lastSeen = 70
+		obj:_restartStalledScanner(71)
+
+		obj._engine.devices[1].engine.lastSeen = 71
+		obj:_restartStalledScanner(105)
+		obj._restartedAt = 105
+		obj:_restartStalledScanner(135)
+
+		assert.are.equal(4, restarts)
+	end)
+
+	it("does not keep restarting a scanner that hears other devices but not the tracked one", function()
+		obj._heartbeat = { at = 20, ads = 600, state = 5 }
+		obj:_restartStalledScanner(35)
+		obj._restartedAt = 35
+
+		obj:_restartStalledScanner(80)
+
+		assert.are.equal(1, restarts)
 	end)
 
 	it("waits while the scanner is being built or the nearby devices are being listed", function()
@@ -428,11 +739,11 @@ end)
 describe("_pauseScanner", function()
 	before_each(setup)
 
-	it("stops the reader without the exit-triggered restart, and kills the app", function()
+	it("stops the reader without the exit-triggered restart, and asks the app to stop", function()
 		startEngine()
 		h.appExists = true
-		h.apps = { { kill9 = function() h.killed = h.killed + 1 end } }
 		obj:_startScanner()
+		h.apps = { newApp(321) }
 		local reader = obj._scanner
 
 		obj:_pauseScanner()
@@ -440,7 +751,108 @@ describe("_pauseScanner", function()
 		assert.is_true(reader.terminated)
 		assert.is_nil(reader.callback)
 		assert.is_nil(obj._scanner)
+		assert.is_true(executed("/bin/kill -TERM 321"))
+		assert.are.equal(0, h.killed)
+	end)
+end)
+
+describe("_stopScanner", function()
+	before_each(function()
+		setup()
+		startEngine()
+	end)
+
+	it("calls back at once when no scanner is running", function()
+		local done = false
+
+		obj:_stopScanner(function() done = true end)
+
+		assert.is_true(done)
+		assert.are.equal(0, #h.executed)
+	end)
+
+	it("asks the scanner to stop with SIGTERM and calls back once it has exited", function()
+		local done = false
+		h.apps = { newApp(321) }
+
+		obj:_stopScanner(function() done = true end)
+
+		assert.is_true(executed("/bin/kill -TERM 321"))
+		assert.is_false(done)
+
+		h.apps = {}
+		h.timers[#h.timers].fn()
+
+		assert.is_true(done)
+		assert.are.equal(0, h.killed)
+	end)
+
+	it("never touches a scanner that started after the stop began", function()
+		local done = false
+		h.apps = { newApp(321) }
+
+		obj:_stopScanner(function() done = true end)
+		local replacement = newApp(654)
+		h.apps = { replacement }
+		for _ = 1, 20 do
+			h.timers[#h.timers].fn()
+		end
+
+		assert.is_true(done)
+		assert.are.equal(0, h.killed)
+		assert.is_false(executed("/bin/kill -TERM 654"))
+	end)
+
+	it("kills a scanner that ignores SIGTERM, then gives up waiting", function()
+		local done = false
+		h.apps = { newApp(321, true) }
+
+		obj:_stopScanner(function() done = true end)
+		for _ = 1, 8 do
+			h.timers[#h.timers].fn()
+		end
 		assert.are.equal(1, h.killed)
+		assert.is_false(done)
+
+		for _ = 1, 8 do
+			h.timers[#h.timers].fn()
+		end
+		assert.is_true(done)
+	end)
+end)
+
+describe("starting after a scanner that is still exiting", function()
+	before_each(setup)
+
+	it("waits for the old scanner to exit before launching the new one", function()
+		startEngine()
+		h.appExists = true
+		h.apps = { newApp(321) }
+
+		obj:_startScanner()
+
+		assert.are.equal(0, #tasksRunning("/usr/bin/open"))
+
+		h.apps = {}
+		h.timers[#h.timers].fn()
+
+		assert.are.equal(1, #tasksRunning("/usr/bin/open"))
+		assert.are.equal(1, #tasksRunning("/bin/cat"))
+	end)
+
+	it("launches only one scanner when started twice while waiting", function()
+		startEngine()
+		h.appExists = true
+		h.apps = { newApp(321) }
+
+		obj:_startScanner()
+		obj:_startScanner()
+		h.apps = {}
+		for _, timer in ipairs(h.timers) do
+			timer.fn()
+		end
+
+		assert.are.equal(1, #tasksRunning("/usr/bin/open"))
 	end)
 end)
 
@@ -462,7 +874,7 @@ describe("_scanNearby", function()
 
 		obj:_scanNearby(6, function(devices) found = devices end)
 		local launch = tasksRunning("/usr/bin/open")[1]
-		finishListing("ID-1\t-80\tTV\nID-9\t-50\tWatch\n")
+		finishListing("R\tID-1\t-80\tTV\nR\tID-9\t-50\tWatch\n")
 
 		assert.are.same({ "-n", launch.args[2], "--args", "--list", "6", "/tmp/t/proximitylock-list.fifo" }, {
 			launch.args[1],

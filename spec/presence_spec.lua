@@ -103,7 +103,7 @@ describe("logging", function()
 	end)
 
 	it("gives a silence reason when it locks", function()
-		newEngine({ missTimeout = 30 })
+		newEngine({ missTimeout = 30, strongMissTimeout = 30 })
 		hold(0, 10, -60)
 		silence(10, 40)
 
@@ -255,7 +255,7 @@ describe("fractional timestamps", function()
 	end
 
 	it("locks on silence without erroring", function()
-		newEngine({ missTimeout = 30 })
+		newEngine({ missTimeout = 30, strongMissTimeout = 30 })
 		holdAt(0, 10, -60, 0.4)
 
 		for t = 10, 45 do
@@ -307,13 +307,42 @@ describe("going away", function()
 	end)
 
 	it("fires when no sample arrives for missTimeout", function()
-		newEngine({ missTimeout = 30 })
+		newEngine({ missTimeout = 30, strongMissTimeout = 30 })
 		hold(0, 10, -60)
 
 		silence(10, 39)
 		assert.are.equal(0, events.away)
 
 		silence(39, 40)
+		assert.are.equal(1, events.away)
+	end)
+
+	it("waits strongMissTimeout, not missTimeout, when the last estimate was strong", function()
+		newEngine({ missTimeout = 30, strongMissTimeout = 100 })
+		hold(0, 10, -60)
+
+		silence(10, 109)
+		assert.are.equal(0, events.away)
+
+		silence(109, 110)
+		assert.are.equal(1, events.away)
+	end)
+
+	it("uses missTimeout when the last estimate was weak", function()
+		newEngine({ missTimeout = 30, strongMissTimeout = 100, lockDelay = 100 })
+		hold(0, 5, -90)
+
+		silence(5, 34)
+		assert.are.equal(0, events.away)
+
+		silence(34, 35)
+		assert.are.equal(1, events.away)
+	end)
+
+	it("uses missTimeout for a device never heard", function()
+		newEngine({ missTimeout = 30, strongMissTimeout = 100 })
+
+		silence(0, 31)
 		assert.are.equal(1, events.away)
 	end)
 
