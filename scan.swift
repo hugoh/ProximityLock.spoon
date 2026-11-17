@@ -2,6 +2,8 @@
 //   ProximityLockScanner [--log <file>] [--rescan] <pipe> <needle>...  stream matching advertisements until killed
 //   ProximityLockScanner --list <seconds> <pipe> report every device heard once, then exit
 //
+// <pipe> may be - for standard output, to watch the signals from a terminal.
+//
 // Every line written to the pipe starts with its type, and the spoon drops anything else:
 //   R<TAB><identifier><TAB><rssi><TAB><name>   one advertisement from a matching device
 //   H<TAB><ads><TAB><state>                    every 10 s: advertisements from any device since the
@@ -16,28 +18,69 @@ import Foundation
 // A write to a closed pipe must come back as an error (see `send`), not kill the process.
 signal(SIGPIPE, SIG_IGN)
 
-var arguments = CommandLine.arguments
+struct Options {
+    var logPath: String?
+    var rescan = false
+    var listSeconds: Double?
+    var pipe = ""
+    var needles: [String] = []
+    var listing: Bool { listSeconds != nil }
+}
+
 // --log <file>: also append timestamped events (start, heartbeats, readings, Bluetooth state) to a
 // file, as evidence of what the scanner did when the pipe to the spoon stalls.
-var eventLog: FileHandle?
-var eventLogPath: String?
-if let flag = arguments.firstIndex(of: "--log"), flag + 1 < arguments.count {
-    eventLogPath = arguments[flag + 1]
-    eventLog = openEventLog(arguments[flag + 1])
-    arguments.removeSubrange(flag...(flag + 1))
-}
 // --rescan: restart the Bluetooth scan by itself when a matched device has been quiet for a while.
-let rescanEnabled = arguments.contains("--rescan")
-arguments.removeAll { $0 == "--rescan" }
-let listing = arguments.count > 3 && arguments[1] == "--list"
-let listSeconds = listing ? Double(arguments[2]) ?? 6 : 0
-let output = FileHandle(forWritingAtPath: listing ? arguments[3] : arguments[1])!
-let needles = listing ? [] : arguments.dropFirst(2).map { $0.lowercased() }
+func parseOptions(_ arguments: [String]) -> Options? {
+    var options = Options()
+    var rest = Array(arguments.dropFirst())
+    if let flag = rest.firstIndex(of: "--log"), flag + 1 < rest.count {
+        options.logPath = rest[flag + 1]
+        rest.removeSubrange(flag...(flag + 1))
+    }
+    options.rescan = rest.contains("--rescan")
+    rest.removeAll { $0 == "--rescan" }
+    let listing = rest.count > 2 && rest[0] == "--list"
+    if listing {
+        options.listSeconds = Double(rest[1]) ?? 6
+        rest.removeFirst(2)
+    }
+    guard let pipe = rest.first, !pipe.isEmpty, !pipe.hasPrefix("--") else { return nil }
+    options.pipe = pipe
+    if !options.listing { options.needles = rest.dropFirst().map { $0.lowercased() } }
+    return options
+}
+
+func requireOptions(_ arguments: [String]) -> Options {
+    guard let options = parseOptions(arguments) else {
+        let usage = "usage: ProximityLockScanner [--log <file>] [--rescan] <pipe|-> <needle>...\n"
+            + "       ProximityLockScanner --list <seconds> <pipe|->\n"
+        FileHandle.standardError.write(Data(usage.utf8))
+        exit(2)
+    }
+    return options
+}
+
+func openOutput(_ path: String) -> FileHandle {
+    guard let handle = path == "-" ? FileHandle.standardOutput : FileHandle(forWritingAtPath: path) else {
+        FileHandle.standardError.write(Data("cannot open \(path) for writing\n".utf8))
+        exit(1)
+    }
+    return handle
+}
+
+let options = requireOptions(CommandLine.arguments)
+let output = openOutput(options.pipe)
+var eventLog = options.logPath.flatMap(openEventLog)
+
+func isOversized(_ path: String) -> Bool {
+    let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int
+    return (size ?? 0) > 1_000_000
+}
 
 // Appends to the file, first moving a log over 1 MB aside so it cannot grow without bound.
 func openEventLog(_ path: String) -> FileHandle? {
     let manager = FileManager.default
-    if let size = (try? manager.attributesOfItem(atPath: path))?[.size] as? Int, size > 1_000_000 {
+    if isOversized(path) {
         try? manager.removeItem(atPath: path + ".1")
         try? manager.moveItem(atPath: path, toPath: path + ".1")
     }
@@ -49,9 +92,7 @@ func openEventLog(_ path: String) -> FileHandle? {
 
 // A scanner can run for days, so the size is checked while it runs, not just at start.
 func rotateEventLogIfLarge() {
-    guard let path = eventLogPath,
-        let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int, size > 1_000_000
-    else { return }
+    guard let path = options.logPath, isOversized(path) else { return }
     eventLog = openEventLog(path)
 }
 
@@ -66,8 +107,8 @@ let unsafeCharacters = CharacterSet.controlCharacters.union(.newlines)
 let maxNameCharacters = 64
 
 func sanitized(_ text: String) -> String {
-    String(String.UnicodeScalarView(text.unicodeScalars.map { unsafeCharacters.contains($0) ? " " : $0 }))
-        .prefix(maxNameCharacters).description
+    let safe = text.map { $0.unicodeScalars.contains(where: unsafeCharacters.contains) ? " " : $0 }
+    return String(safe.prefix(maxNameCharacters))
 }
 
 // The spoon gets every reading; the log gets at most one a second, which is enough to see gaps.
@@ -123,7 +164,8 @@ final class Scanner: NSObject, CBCentralManagerDelegate {
     func rescanIfQuiet() {
         let now = Date()
         lastHeard = lastHeard.filter { now.timeIntervalSince($0.value) <= forgetAfter }
-        guard rescanEnabled, !listing, central.state == .poweredOn, now.timeIntervalSince(lastRescanAt) > quietLimit,
+        guard options.rescan, !options.listing, central.state == .poweredOn,
+            now.timeIntervalSince(lastRescanAt) > quietLimit,
             lastHeard.values.contains(where: { now.timeIntervalSince($0) > quietLimit })
         else { return }
         record(
@@ -144,13 +186,13 @@ final class Scanner: NSObject, CBCentralManagerDelegate {
         let name = sanitized(advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? peripheral.name ?? "")
         let id = peripheral.identifier.uuidString
 
-        if listing {
+        if options.listing {
             let known = heard[id]
             heard[id] = (name.isEmpty ? known?.name ?? "" : name, max(rssi, known?.rssi ?? Int.min))
             return
         }
         let haystacks = [id.lowercased(), name.lowercased()]
-        let byNeedle = needles.contains(where: { needle in haystacks.contains { $0.contains(needle) } })
+        let byNeedle = options.needles.contains(where: { needle in haystacks.contains { $0.contains(needle) } })
         guard byNeedle || matchedIds.contains(id) else { return }
         matchedIds.insert(id)
         lastHeard[id] = Date()
@@ -177,7 +219,7 @@ final class Scanner: NSObject, CBCentralManagerDelegate {
 record("scanner started (pid \(ProcessInfo.processInfo.processIdentifier))")
 let scanner = Scanner()
 _ = scanner.central
-if listing {
+if let listSeconds = options.listSeconds {
     DispatchQueue.main.asyncAfter(deadline: .now() + listSeconds) {
         scanner.report()
         exit(0)
@@ -185,7 +227,7 @@ if listing {
 }
 // Kept at top level: sources that go out of scope are cancelled, which would leave the signals ignored.
 var stopSources: [DispatchSourceSignal] = []
-if !listing {
+if !options.listing {
     // Log why the scanner ends where it can. SIGKILL, which the spoon falls back to, cannot be caught,
     // so the spoon notes that itself; a closed pipe is reported by `send`.
     for (name, number) in [("SIGTERM", SIGTERM), ("SIGINT", SIGINT), ("SIGHUP", SIGHUP)] {
@@ -200,6 +242,6 @@ if !listing {
         stopSources.append(source)
     }
     Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in scanner.heartbeat() }
-    if rescanEnabled { Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in scanner.rescanIfQuiet() } }
+    if options.rescan { Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in scanner.rescanIfQuiet() } }
 }
 RunLoop.main.run()
