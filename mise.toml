@@ -44,6 +44,17 @@ run = "luarocks install --tree .rocks hs-mock $HS_MOCK_VERSION"
 sources = ["mise.toml"]
 outputs = [".rocks/lib/luarocks/rocks-5.4/hs-mock/*/rock_manifest"]
 
+[tasks.scan]
+usage = 'arg "<needle>..." help="Part of a device name or identifier; an empty string matches every device"'
+run = """
+eval "set -- $usage_needle"
+cache=$(mktemp -d)
+trap 'rm -rf "$cache"' EXIT
+sh build-scanner.sh "$PWD" "$cache" dev
+"$cache/dev/ProximityLockScanner.app/Contents/MacOS/ProximityLockScanner" - "$@"
+"""
+description = "Build the scanner and stream matching advertisements to the terminal"
+
 [tasks.test]
 depends = ["deps"]
 run = "busted --verbose"

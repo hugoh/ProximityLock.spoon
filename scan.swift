@@ -2,6 +2,8 @@
 //   ProximityLockScanner [--log <file>] [--rescan] <pipe> <needle>...  stream matching advertisements until killed
 //   ProximityLockScanner --list <seconds> <pipe> report every device heard once, then exit
 //
+// <pipe> may be - for standard output, to watch the signals from a terminal.
+//
 // Every line written to the pipe starts with its type, and the spoon drops anything else:
 //   R<TAB><identifier><TAB><rssi><TAB><name>   one advertisement from a matching device
 //   H<TAB><ads><TAB><state>                    every 10 s: advertisements from any device since the
@@ -31,7 +33,22 @@ let rescanEnabled = arguments.contains("--rescan")
 arguments.removeAll { $0 == "--rescan" }
 let listing = arguments.count > 3 && arguments[1] == "--list"
 let listSeconds = listing ? Double(arguments[2]) ?? 6 : 0
-let output = FileHandle(forWritingAtPath: listing ? arguments[3] : arguments[1])!
+let pipePath = listing ? arguments[3] : (arguments.count > 1 ? arguments[1] : "")
+if pipePath.isEmpty || pipePath.hasPrefix("--") {
+    let usage = "usage: ProximityLockScanner [--log <file>] [--rescan] <pipe|-> <needle>...\n"
+        + "       ProximityLockScanner --list <seconds> <pipe|->\n"
+    FileHandle.standardError.write(Data(usage.utf8))
+    exit(2)
+}
+let output = openOutput(pipePath)
+
+func openOutput(_ path: String) -> FileHandle {
+    guard let handle = path == "-" ? FileHandle.standardOutput : FileHandle(forWritingAtPath: path) else {
+        FileHandle.standardError.write(Data("cannot open \(path) for writing\n".utf8))
+        exit(1)
+    }
+    return handle
+}
 let needles = listing ? [] : arguments.dropFirst(2).map { $0.lowercased() }
 
 // Appends to the file, first moving a log over 1 MB aside so it cannot grow without bound.
